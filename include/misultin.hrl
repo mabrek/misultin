@@ -26,7 +26,8 @@
 % POSSIBILITY OF SUCH DAMAGE.
 % ==========================================================================================================
 
-% define debug
+
+% ============================ \/ DEBUG ====================================================================
 -ifdef(log_debug).
 -define(LOG_DEBUG(Str, Args), erlang:apply(error_logger, info_msg, [lists:concat(["[DEBUG]	pid: ", pid_to_list(self()), "~n	module: ", ?MODULE, "~n	line: ", ?LINE, "~n", Str, "~n"]), Args])).
 -define(LOG_INFO(Str, Args), erlang:apply(error_logger, info_msg, [lists:concat(["	module: ", ?MODULE, "~n	line: ", ?LINE, "~n", Str, "~n"]), Args])).
@@ -52,47 +53,134 @@
 -endif.
 -endif.
 -endif.
+% ============================ /\ DEBUG ====================================================================
+
+
+% ============================ \/ TYPES ====================================================================
+
+% ---------------------------- \/ MISULTIN -----------------------------------------------------------------
+-type misultin_option_tcp() ::
+	{ip, string() | tuple()} |
+	{port, non_neg_integer()} |
+	{backlog, non_neg_integer()} |
+	{acceptors_poolsize, non_neg_integer()} |
+	{recv_timeout, non_neg_integer()} |
+	{max_connections, non_neg_integer()} |
+	{ssl, gen_proplist()} |
+	{recbuf, non_neg_integer()}.
+-type misultin_option_server() :: 
+	{name, atom()} |
+	{post_max_size, non_neg_integer()} |
+	{get_url_max_size, non_neg_integer()} |
+	{compress, boolean()} |
+	{loop, function()} |
+	{autoexit, boolean()} |
+	{ws_loop, boolean()} |
+	{ws_autoexit, boolean()} |
+	{no_headers, boolean()} |
+	{ws_no_headers, boolean()}.
+-type misultin_option() :: misultin_option_tcp() |  misultin_option_server().
+% ---------------------------- /\ MISULTIN -----------------------------------------------------------------
+
+% ---------------------------- \/ HTTP ---------------------------------------------------------------------
+-type http_version() :: {Maj::non_neg_integer(), Min::non_neg_integer()}.
+
+-type http_header() :: 'Cache-Control' | 'Connection' | 'Date' | 'Pragma' | 'Transfer-Encoding' | 'Upgrade' |
+	'Via' | 'Accept' | 'Accept-Charset' | 'Accept-Encoding' | 'Accept-Language' | 'Authorization' | 'From' |
+	'Host' | 'If-Modified-Since' | 'If-Match' | 'If-None-Match' | 'If-Range' | 'If-Unmodified-Since' |
+	'Max-Forwards' | 'Proxy-Authorization' | 'Range' | 'Referer' | 'User-Agent' | 'Age' | 'Location' |
+	'Proxy-Authenticate' | 'Public' | 'Retry-After' | 'Server' | 'Vary' | 'Warning' | 'Www-Authenticate' |
+	'Allow' | 'Content-Base' | 'Content-Encoding' | 'Content-Language' | 'Content-Length' | 'Content-Location' |
+	'Content-Md5' | 'Content-Range' | 'Content-Type' | 'Etag' | 'Expires' | 'Last-Modified' | 'Accept-Ranges' |
+	'Set-Cookie' | 'Set-Cookie2' | 'X-Forwarded-For' | 'Cookie' | 'Keep-Alive' | 'Proxy-Connection' |
+	list() | binary().
+-type http_headers() :: list({http_header(), list() | binary() | integer() | atom()}).
+
+-type http_method() :: 'GET' | 'POST' | 'HEAD' | 'PUT' | 'DELETE' | 'TRACE' | 'CONNECT'.
+
+-type http_connection() :: close | keep_alive.
+
+-type http_uri() ::
+	{abs_path, Path::list()} |
+	{absoluteURI, Path::list()} |
+	{absoluteURI, http | https | atom(), Host::binary(), Port::non_neg_integer(), Path::list()} |
+	{scheme, Scheme::list(), RequestString::list()}.
+	
+-type http_supported_encoding() :: deflate | gzip.
+% ---------------------------- /\ HTTP ---------------------------------------------------------------------
+
+% ---------------------------- \/ OTHER --------------------------------------------------------------------
+-type websocket_version() ::
+	{'draft-hixie', 68} |
+	{'draft-hixie', 76}.
+
+-type socketmode() :: http | ssl.
+-type socket() :: inet:socket() | term().	% unfortunately ssl does not export the socket equivalent, we could use {sslsocket, term(), term()} but this is relying on internals.
+
+-type cookies_options() :: [
+	{max_age, undefined | integer()} |
+	{local_time, undefined | date_tuple()} |
+	{secure, true | term()} |
+	{domain, undefined | string()} |
+	{path, undefined | string()} |
+	{http_only, true | term()}
+].
+
+-type gen_proplist() :: [{Tag::atom()|list()|binary(), Value::term()}].
+
+-type date_tuple() :: {{non_neg_integer(), 1..12, 1..31}, {0..24, 0..60, 0..60}}.
+% ---------------------------- /\ OTHER --------------------------------------------------------------------
+
+% ============================ /\ TYPES ====================================================================
+
+
+% ============================ \/ RECORDS ==================================================================
 
 % misultin server Options
 -record(custom_opts, {
-	post_max_size,				% maximum post size in bytes, defaults to 4 MB
-	get_url_max_size,			% maximum GET url size in bytes, defaults to 2000
-	compress,					% send compressed output if supported by browser
-	stream_support,				% stream support option
-	loop,						% the fun handling requests
-	autoexit,					% true | false
-	ws_loop,					% the loop handling websockets
-	ws_autoexit					% true | false
+	post_max_size		= undefined :: undefined | non_neg_integer(),	% maximum post size in bytes, defaults to 4 MB
+	get_url_max_size	= undefined :: undefined | non_neg_integer(),	% maximum GET url size in bytes, defaults to 2000
+	compress			= false :: boolean(),							% send compressed output if supported by browser
+	loop				= undefined :: undefined | function(),			% the fun handling requests
+	autoexit			= true :: boolean(),							% shoud the http process be automatically killed?
+	ws_loop				= undefined :: undefined | function(),			% the loop handling websockets
+	ws_autoexit			= true :: boolean(),							% shoud the ws process be automatically killed?
+	no_headers			= false :: boolean(),							% optimization option, do not save headers in passed request over to developer code
+	ws_no_headers		= false :: boolean()							% optimization option, do not save headers in passed request over to developer code
 }).
 
 % Request
 -record(req, {
-	socket,						% the socket handling the request
-	socket_mode,				% http | ssl
-	peer_addr,					% peer IP | undefined
-	peer_port,					% peer port | undefined
-	peer_cert,					% undefined | the DER encoded peer certificate that can be decoded with public_key:pkix_decode_cert/2
-	connection = close,			% keep_alive | close
-	content_length,				% Integer
-	vsn,						% {Maj,Min}
-	method,						% 'GET'|'POST'
-	uri,						% Truncated URI /index.html
-	args = "",					% Part of URI after ?
-	headers,					% [{Tag, Val}]
-	body = <<>>					% Content Body
+	socket			= undefined :: undefined | socket(),			% the socket handling the request
+	socket_mode		= http :: socketmode(),
+	peer_addr		= undefined :: undefined | inet:ip_address(),	% peer IP | undefined
+	peer_port		= undefined :: undefined | non_neg_integer(),	% peer port | undefined
+	peer_cert		= undefined :: undefined | term(),				% the DER encoded peer certificate that can be decoded with public_key:pkix_decode_cert/2
+	connection		= close :: keep_alive | close,
+	content_length	= undefined :: undefined | non_neg_integer(),
+	vsn				= undefined :: undefined | http_version(),
+	method			= undefined :: undefined | http_method(),
+	uri				= undefined :: undefined | http_uri(),
+	args			= "" :: list(),									% Part of URI after ?
+	headers			= [] :: http_headers(),
+	no_headers		= false :: boolean(),
+	body			= <<>> :: binary()
 }).
 
 % Websocket Request
 -record(ws, {
-	socket,						% the socket handling the request
-	socket_mode,				% http | ssl
-	ws_autoexit,				% websocket process is automatically killed: true | false
-	peer_addr,					% peer IP | undefined
-	peer_port,					% peer port | undefined
-	peer_cert,					% undefined | the DER encoded peer certificate that can be decoded with public_key:pkix_decode_cert/2
-	vsn,						% {Maj,Min} | {'draft-hixie', Ver}
-	origin,						% the originator
-	host,						% the host
-	path,						% the websocket GET request path
-	headers						% [{Tag, Val}]
+	socket			= undefined :: undefined | socket(),			% the socket handling the request
+	socket_mode		= http :: socketmode(),
+	ws_autoexit		= true :: boolean(),							% shoud the ws process be automatically killed?
+	peer_addr		= undefined :: undefined | inet:ip_address(),	% peer IP | undefined
+	peer_port		= undefined :: undefined | non_neg_integer(),	% peer port | undefined
+	peer_cert		= undefined :: undefined | term(),				% the DER encoded peer certificate that can be decoded with public_key:pkix_decode_cert/2
+	vsn				= undefined :: undefined | websocket_version(),
+	origin			= undefined :: undefined | list(),				% the originator
+	host			= undefined :: undefined | list(),				% the host
+	path			= undefined :: undefined | list(),				% the websocket GET request path
+	headers			= [] :: http_headers(),
+	ws_no_headers	= false :: boolean()
 }).
+
+% ============================ /\ RECORDS ==================================================================
